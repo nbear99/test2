@@ -1,0 +1,136 @@
+#!/usr/bin/env python
+
+import logging
+import sys
+import time
+
+import boto3
+import configargparse
+
+from botocore.config import Config
+
+from lib.asg import ASG
+from lib.ecs import ECS
+
+class Updater:
+    def __init__(self):
+        self.__parse_args()
+        self.__init_log()
+        self.logger.info(f'input arguments: {self.args.__dict__}')
+        self.boto_session = boto3.Session()
+        self.boto_config = Config(
+            region_name=self.args.region,
+            signature_version='v4'
+        )
+
+    def __parse_args(self):
+        parser = configargparse.ArgumentParser()
+        parser.add_argument(
+            '-c',
+            '--cluster',
+            env_var='CLUSTER',
+            required=True,
+            help='name of cluster for which to replace instances'
+        )
+        parser.add_argument(
+            '-r',
+            '--region',
+            env_var='AWS_REGION',
+            default='us-east-1',
+            help='AWS region to communicate with for API calls [default: us-east-1]',
+        )
+        parser.add_argument(
+            '-f',
+            '--force',
+            env_var='FORCE',
+            action='store_true',
+            default=False,
+            help='force replacement of instances, even if AMI matches latest',
+        )
+        parser.add_argument(
+            '-l',
+            '--log_level',
+            env_var='LOG_LEVEL',
+            default='INFO',
+            help='log level of logger (DEBUG, INFO, WARNING, ERROR, CRITICAL) [default: INFO]',
+        )
+        self.args = parser.parse_args()
+
+    def __init_log(self):
+        if self.args.log_level.upper() in list(logging._nameToLevel.keys()):
+            level = logging.getLevelName(self.args.log_level.upper())
+        else:
+            level = logging.INFO
+        logging.basicConfig(
+            stream=sys.stdout,
+            level=level,
+            format='%(asctime)s | %(levelname)s | %(message)s',
+        )
+        self.logger = logging.getLogger()
+
+    def roll_instances(self, asg_name, cluster):
+        for instance in self.ecs.cluster_instances:
+            if instance['instance_id'] not in self.asg.instances:
+                continue
+            ami_id = self.asg.instance_ami(instance['instance_id'])
+            if (ami_id == self.asg.latest_ami) and (not self.args.force):
+                self.logger.info(f'AMI for {instance} is up to date and FORCE not set, not rotating')
+                continue
+            drain_time = self.detach_and_drain(instance)
+            self.deregister(instance, asg_name)
+            self.logger.info(f"terminating {instance['instance_id']}")
+            self.asg.terminate_instance(instance['instance_id'])
+            if (asg_name == self.ecs.cluster_asgs[-1]) and (instance['instance_id'] == self.asg.instances[-1]):
+                return
+            self.sleep(drain_time)
+
+    def detach_and_drain(self, instance):
+        self.logger.info(f"detaching {instance['instance_id']} from ASG")
+        self.asg.detach_instance_from_asg(instance['instance_id'])
+        self.logger.info(f"draining {instance['instance_id']} of all container tasks....")
+        self.ecs.drain_instance(instance)
+        drain_time = 0
+        while True:
+            count = self.ecs.instance_task_count(instance)
+            if count == 0:
+                break
+            time.sleep(2)
+            drain_time += 2
+            if drain_time > 3600:
+                raise TimeoutError(f'{instance} took too long to drain, maybe it is stuck?')
+                sys.exit(1)
+        return drain_time
+
+    def deregister(self, instance, asg_name):
+        self.logger.info(f"deregistering {instance['instance_id']} from ECS cluster")
+        self.ecs.deregister_instance(instance)
+        if (self.asg.orig_desired != self.asg.curr_capacity()) and (self.asg.curr_capacity() < self.asg.orig_desired):
+            raise AssertionError(f'{asg_name} ASG doesnt have as many instances as it originally had, maybe it cant make new instances?')
+            sys.exit(1)
+
+    def sleep(self, drain_time):
+        base_time = 900 if self.asg.platform.lower().startswith('windows') else 120
+        sleep_time = base_time - (drain_time * 0.25) if drain_time < 120 else 0
+        if sleep_time != 0:
+            self.logger.info(f'sleeping {sleep_time} seconds before moving to next server')
+            time.sleep(int(sleep_time))
+
+def main():
+    updater = Updater()
+    updater.ecs = ECS(updater.args.cluster, updater.boto_session, updater.boto_config)
+    for asg_name in updater.ecs.cluster_asgs:
+        updater.asg = ASG(asg_name, updater.boto_session, updater.boto_config)
+        updater.logger.info(f"found AMI for {asg_name}: {updater.asg.latest_ami}")
+        if updater.asg.lt_curr_ami == updater.asg.latest_ami:
+            updater.logger.info(f'ami for {asg_name} is up to date')
+        else:
+            updater.logger.info(f'found newer AMI for {asg_name} ({updater.asg.latest_ami}), updating launch template')
+            updater.asg.update_launch_template()
+            updater.asg.set_launch_template_version()
+
+        updater.logger.info(f'rolling instances in the {updater.args.cluster} ECS cluster')
+        updater.roll_instances(asg_name, updater.args.cluster)
+        updater.logger.info('all instances have been replaced')
+
+if __name__ == "__main__":
+    main()
