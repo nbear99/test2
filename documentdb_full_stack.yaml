@@ -1,6 +1,14 @@
 Description:  "AWS CloudFormation Sample Template DocumentDB_Quick_Create: Sample template showing how to create a DocumentDB DB cluster and DB instance. **WARNING** This template creates an Amazon DocumentDB resources and you will be billed for the AWS resources used if you create a stack from this template."
 
 Parameters: 
+  Purpose:
+    Type: String
+    Default: testing
+    AllowedValues:
+      - testing
+      - production
+    Description: The purpose of this instance.
+    
   DBClusterName: 
     Default: "MyCluster"
     Description : "Cluster name"
@@ -77,4 +85,5 @@ Outputs:
     Value: !GetAtt DBCluster.Port
   EngineVersion:
     Value: "4.0.0"
-
+  StackName:
+    Value: !Ref AWS::StackName
