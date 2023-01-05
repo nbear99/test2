@@ -28,6 +28,7 @@ Parameters:
     ConstraintDescription : "Must begin with a letter and contain only alphanumeric characters."
 
   MasterUser:
+    Default: "DefaultMasterUser"
     NoEcho: "true"
     Description : "The database admin account username"
     Type: "String"
@@ -37,6 +38,7 @@ Parameters:
     ConstraintDescription : "Must begin with a letter and contain only alphanumeric characters."
 
   MasterPassword:
+    Default: "DefaultMasterPassword"
     NoEcho: "true"
     Description : "The database admin account password"
     Type: "String"
