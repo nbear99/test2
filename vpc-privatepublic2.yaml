@@ -150,24 +150,24 @@ Outputs:
     Description: VPC ID
     Value: !Ref "PubPrivateVPC"
     Export:
-      Name: VPCID
+      Name: VPC-ID
   PrivateSubnet1ID:
     Description: Private Subnet A ID
     Value: !Ref "PrivateSubnet1"
     Export:
-      Name: PrivateSubnet1ID
+      Name: Private-Subnet1ID
   PrivateSubnet2ID:
     Description: Private Subnet B ID
     Value: !Ref "PrivateSubnet2"
     Export:
-      Name: PrivateSubnet2ID
+      Name: Private-Subnet2ID
   PublicSubnet1ID:
     Description: Public Subnet A ID
     Value: !Ref "PublicSubnet1"
     Export:
-      Name: PublicSubnet1ID
+      Name: Public-Subnet1ID
   PublicSubnet2ID:
     Description: Public Subnet B ID
     Value: !Ref "PublicSubnet2"
     Export:
-      Name: PublicSubnet2ID
+      Name: Public-Subnet2ID
